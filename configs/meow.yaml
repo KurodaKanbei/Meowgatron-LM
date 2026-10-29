@@ -1,0 +1,31 @@
+# GPU / 950DT 分别完整遍历 FineWeb-Edu 10BT；GBS 256。
+device: ${oc.env:MEOWGATRON_DEVICE,npu:0}
+seed: 42
+output_root: ../runs/meow-0.5b
+
+data:
+  root: ${oc.env:MEOWGATRON_DATA_ROOT,../data}
+  micro_batch_size: 32
+  global_batch_size: 256
+
+model:
+  vocab_size: 50257
+  hidden_size: 1280
+  num_heads: 20
+  mlp_hidden_size: ${meow.mul:4,${model.hidden_size}}
+  max_seq_len: 512
+  num_layers: 20
+
+optimizer:
+  lr: 0.0003
+  weight_decay: 0.0
+
+training:
+  max_steps: null
+  precision: bf16
+  log_interval: 100
+  checkpoint_interval: 1000
+
+tensorboard:
+  enabled: true
+  flush_secs: 10

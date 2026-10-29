@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="248" viewBox="0 0 1000 248" role="img" aria-labelledby="title desc">
+  <title id="title">Meowgatron-LM</title>
+  <desc id="desc">An orange cat beside the Meowgatron-LM wordmark. One step at a time.</desc>
+  <rect width="1000" height="248" rx="24" fill="#fff8ed"/>
+  <g transform="translate(35 28)" stroke="#273c36" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M31 80 24 22 72 49 Q96 42 119 49 L166 22 159 82 Q172 103 164 128 Q154 157 96 163 Q40 157 28 130 Q18 104 31 80Z" fill="#ee9c65"/>
+    <path d="m39 42 4 30 20-17M151 42l-4 30-20-17" fill="#f8c9a6" stroke="none"/>
+    <path d="m78 56 9 13 9-15 9 15 9-13" fill="none" stroke-width="4"/>
+    <path d="M53 98q12-12 23 0m40 0q12-12 23 0" fill="none"/>
+    <path d="m89 111 7 6 7-6Z" fill="#273c36" stroke-width="3"/>
+    <path d="M96 117v7m0 0q-9 11-18 1m18-1q9 11 18 1" fill="none" stroke-width="4"/>
+    <path d="m14 106 27 7m-31 14 30-2m135-19-27 7m31 14-30-2" fill="none" stroke-width="4"/>
+    <path d="M56 177h80" stroke="#ee9c65" stroke-width="8"/>
+    <circle cx="96" cy="177" r="5" fill="#273c36" stroke="none"/>
+  </g>
+  <path d="M247 62v124" stroke="#e4ddcf" stroke-width="2"/>
+  <g font-family="DejaVu Sans, Arial, sans-serif">
+    <text x="283" y="117" fill="#273c36" font-size="65" font-weight="700" letter-spacing="-2">Meowgatron-LM</text>
+    <text x="286" y="166" fill="#56665d" font-size="24">One step at a time</text>
+  </g>
+</svg>

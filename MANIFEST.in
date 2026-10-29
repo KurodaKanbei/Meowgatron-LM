@@ -1,0 +1,4 @@
+include assets/*.svg
+include docs/data.md
+prune docs/articles
+recursive-include configs *.yaml
