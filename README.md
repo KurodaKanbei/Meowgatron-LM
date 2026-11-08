@@ -28,15 +28,35 @@ python -m pip install -e '.[npu]'
 export MEOWGATRON_DATA_ROOT=/path/to/meowgatron-data
 ```
 
-选择对应设备的命令启动训练：
+在 YAML 中设置 `device`：NVIDIA GPU 使用 `cuda:0`，Ascend NPU 使用 `npu:0`。
+单卡训练：
 
 ```bash
-# NVIDIA GPU
-python -m examples.meow --config configs/meow.yaml device=cuda:0
-
-# Ascend NPU
-python -m examples.meow --config configs/meow.yaml device=npu:0
+python -m examples.meow --config configs/meow.yaml
 ```
+
+八卡数据并行训练：
+
+```bash
+torchrun --standalone --nproc_per_node=8 -m examples.meow --config configs/meow.yaml
+```
+
+各进程按 `LOCAL_RANK` 绑定设备。
+`global_batch_size` 是所有卡合计的 batch，须为 `micro_batch_size × 卡数` 的整数倍。
+950DT 多卡训练使用 HCCL 9.2.0，包含 [OneShot 规约顺序修复](https://github.com/hicann/hccl/commit/f54ff6beb1dd3cda558481b839e2979b9031d3e9)。
+
+续训时，在 YAML 中填写 checkpoint 路径，使用相同的启动命令、卡数和 batch 配置：
+
+```yaml
+checkpoint:
+  interval: 1000
+  resume: /path/to/checkpoint.pt
+```
+
+`interval` 按参数更新次数计数，设为 `null` 时仅在正常结束时保存；从头训练将 `resume` 设为 `null`。
+恢复会新建输出目录，日志的 step 和累计 token 数接续原值。
+`training.max_steps` 是累计更新终点，设为 `null` 时训练到数据耗尽。
+数据分配与读取位置的恢复见[数据准备](docs/data.md#样本语义)。
 
 用 TensorBoard 查看 loss、iteration time 和吞吐：
 

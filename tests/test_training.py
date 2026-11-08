@@ -26,12 +26,15 @@ def test_text_packing_preserves_document_boundaries_and_target_shift(tmp_path):
     dataset = TokenDataset(
         [tmp_path / "b.parquet", tmp_path / "a.parquet"], tokenizer, seq_len=3
     )
+    initial_state = dataset.state_dict()
     samples = list(dataset)
     stream = torch.tensor([2, 3, 4, 1, 5, 1, 2, 3, 4, 5, 1])
     assert len(samples) == 3
     torch.testing.assert_close(torch.cat([x for x, _ in samples]), stream[:9])
     torch.testing.assert_close(torch.cat([y for _, y in samples]), stream[1:10])
-    for (x, y), (again_x, again_y) in zip(samples, list(dataset)):
+    assert list(dataset) == []
+    dataset.load_state_dict(initial_state)
+    for (x, y), (again_x, again_y) in zip(samples, list(dataset), strict=True):
         torch.testing.assert_close(x, again_x)
         torch.testing.assert_close(y, again_y)
 
@@ -55,7 +58,7 @@ def optimizer_for(model):
     )
 
 
-def test_native_training_learns_a_repeating_token_sequence(tmp_path):
+def test_native_training_learns_a_repeating_token_sequence():
     torch.manual_seed(42)
     model = small_model()
     optimizer = optimizer_for(model)
@@ -66,9 +69,8 @@ def test_native_training_learns_a_repeating_token_sequence(tmp_path):
         model,
         loader,
         optimizer,
-        TrainConfig(max_steps=None, log_interval=40, checkpoint_interval=20),
+        TrainConfig(max_steps=None, log_interval=40),
         torch.device("cpu"),
-        checkpoint_path=tmp_path / "checkpoint.pt",
         gradient_accumulation_steps=2,
     )
     assert result["steps"] == 40
@@ -77,12 +79,7 @@ def test_native_training_learns_a_repeating_token_sequence(tmp_path):
     for parameter in model.parameters():
         assert parameter.grad is not None
         assert torch.isfinite(parameter.grad).all()
-    checkpoint = torch.load(tmp_path / "checkpoint.pt", weights_only=True)
-    assert checkpoint["steps"] == 40
-    assert checkpoint["tokens_seen"] == result["tokens_seen"]
-    torch.testing.assert_close(checkpoint["model"], model.state_dict())
-    assert len(checkpoint["optimizer"]["state"]) == len(list(model.parameters()))
-    for state in checkpoint["optimizer"]["state"].values():
+    for state in optimizer.state.values():
         assert state["exp_avg"].dtype == state["exp_avg_sq"].dtype == torch.float32
 
     reference = small_model()

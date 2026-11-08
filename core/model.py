@@ -24,7 +24,6 @@ class TransformerBlock(nn.Module):
 class Meow(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
-        self.config = config
         self.token_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.position_embedding = nn.Embedding(config.max_seq_len, config.hidden_size)
         self.layers = nn.ModuleList(

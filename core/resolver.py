@@ -6,6 +6,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 from core.config import (
+    CheckpointConfig,
     DataConfig,
     ExperimentConfig,
     ModelConfig,
@@ -30,6 +31,7 @@ def load_config(path: str | Path, overrides=()) -> ExperimentConfig:
         ("model", ModelConfig),
         ("optimizer", OptimizerConfig),
         ("training", TrainConfig),
+        ("checkpoint", CheckpointConfig),
         ("tensorboard", TensorBoardConfig),
     ):
         values[section] = factory(**values[section])
@@ -42,6 +44,14 @@ def load_config(path: str | Path, overrides=()) -> ExperimentConfig:
         config,
         data=replace(config.data, root=absolute_path(config.data.root)),
         output_root=absolute_path(config.output_root),
+        checkpoint=replace(
+            config.checkpoint,
+            resume=(
+                absolute_path(config.checkpoint.resume)
+                if config.checkpoint.resume is not None
+                else None
+            ),
+        ),
     )
 
 

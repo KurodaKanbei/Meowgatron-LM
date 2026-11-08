@@ -18,7 +18,12 @@ class TrainConfig:
     max_steps: int | None = 100
     precision: str = "fp32"
     log_interval: int = 10
-    checkpoint_interval: int | None = None
+
+
+@dataclass(frozen=True)
+class CheckpointConfig:
+    interval: int | None = None
+    resume: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,4 +54,5 @@ class ExperimentConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     training: TrainConfig = field(default_factory=TrainConfig)
+    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tensorboard: TensorBoardConfig = field(default_factory=TensorBoardConfig)

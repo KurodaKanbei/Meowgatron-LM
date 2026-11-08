@@ -51,8 +51,7 @@ meowgatron-data/
     └── tokenizer.json
 ```
 
-实验还会读取可选的 `fineweb-edu-10bt/manifest.json`，将其中的 revision 和
-manifest 指纹记录到 `run.json`。当前环境的持久化数据副本已经包含完整的来源和校验清单。
+实验还会读取可选的 `fineweb-edu-10bt/manifest.json`，将其中的 revision 记录到 `run.json`。
 
 ## 样本语义
 
@@ -63,8 +62,14 @@ manifest 指纹记录到 `run.json`。当前环境的持久化数据副本已经
 5. 下一个窗口前进 `seq_len` 个 token，保持预测目标连续。
 
 窗口允许跨文档，EOS 标记边界；attention 使用普通 causal mask。
-末尾不足一个窗口的 token 和不足一个 batch 的样本会丢弃。
-当前只准备训练数据，不划分 eval，不做 shuffle，也不支持多 worker 读取。
+末尾不足一个窗口的 token 和不足一个完整 global batch 的样本不参与更新。
+当前只准备训练数据，不划分 eval，不做 shuffle，使用 `num_workers=0`。
+分词使用流式读取，每次处理一小批文档。
 
-分词使用流式读取，每次处理一小批文档。后续离线 tokenization、shuffle 和多进程读取
-可以分别引入，并与这一版的数据语义核对。
+DP 按 packed 样本的全局编号分配数据：样本 `i` 交给 rank `i % world_size`。
+各 rank 读取同一条 token 流，组成一次更新的样本合起来与单卡相同。
+当前实现会在每个 rank 重复读取和分词，这部分开销也计入训练时间。
+
+`TokenDataset` 保存分片、row group、文档位置、剩余 packing token 和样本编号。
+迭代器从当前位置继续；重新遍历需要新建数据集，或加载起始状态。
+恢复时从保存的 row group 开始读取，跳过其中已经消费的文档，保留窗口之间的一个重叠 token。
