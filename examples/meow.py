@@ -15,8 +15,18 @@ from torch.utils.data import DataLoader
 
 from core.checkpoint import load_checkpoint
 from core.data import TokenDataset
-from core.distributed import rank, setup_distributed, world_size, wrap_model
+from core.distributed import (
+    data_parallel_rank,
+    data_parallel_size,
+    pipeline_rank,
+    pipeline_size,
+    rank,
+    setup_distributed,
+    world_size,
+    wrap_model,
+)
 from core.model import Meow
+from core.pipeline import PipelineStage
 from core.resolver import config_to_yaml, load_config
 from core.training import train
 
@@ -35,7 +45,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     config_path = args.config.expanduser().resolve()
     config = load_config(config_path, args.overrides)
-    device = setup_distributed(config.device)
+    layout = config.distributed.pipeline_layout
+    if sum(layout) != config.model.num_layers or any(count < 1 for count in layout):
+        raise ValueError(
+            "pipeline_layout must contain positive layer counts summing to num_layers"
+        )
+    device = setup_distributed(config.device, len(layout))
     try:
         run_experiment(config_path, config, device)
     finally:
@@ -44,7 +59,11 @@ def main(argv=None):
 
 
 def run_experiment(config_path, config, device):
-    local_batch = config.data.micro_batch_size * world_size()
+    if config.training.recompute not in ("none", "full", "selective"):
+        raise ValueError("training.recompute must be none, full or selective")
+    if set(config.training.recompute_modules) - {"attention", "norm", "mlp_act", "mlp"}:
+        raise ValueError("recompute_modules supports attention, norm, mlp_act and mlp")
+    local_batch = config.data.micro_batch_size * data_parallel_size()
     if (
         local_batch <= 0
         or config.data.global_batch_size <= 0
@@ -60,8 +79,8 @@ def run_experiment(config_path, config, device):
         (data_root / "fineweb-edu-10bt/sample/10BT").glob("*.parquet"),
         tokenizer,
         config.model.max_seq_len,
-        rank=rank(),
-        world_size=world_size(),
+        rank=data_parallel_rank(),
+        world_size=data_parallel_size(),
     )
     if not dataset.files:
         raise FileNotFoundError(f"No FineWeb-Edu Parquet shards under {data_root}")
@@ -72,7 +91,17 @@ def run_experiment(config_path, config, device):
         drop_last=True,
     )
     torch.manual_seed(config.seed)
-    model = Meow(config.model).to(device)
+    model = Meow(
+        config.model,
+        recompute=config.training.recompute,
+        recompute_modules=config.training.recompute_modules,
+    )
+    parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    if pipeline_size() > 1:
+        model = PipelineStage(
+            model, pipeline_rank(), config.distributed.pipeline_layout
+        )
+    model = model.to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), **asdict(config.optimizer), foreach=False, fused=False
     )
@@ -91,12 +120,14 @@ def run_experiment(config_path, config, device):
         "config_source": str(config_path),
         "device": str(device),
         "world_size": world_size(),
+        "data_parallel_size": data_parallel_size(),
+        "pipeline_size": pipeline_size(),
         "parameter_dtype": "float32",
         "torch_version": torch.__version__,
         "tokenizers_version": importlib.metadata.version("tokenizers"),
         "data_files": [str(path.relative_to(data_root)) for path in dataset.files],
         "data_order": "sorted shards, stored rows, packed sample i goes to rank i % DP",
-        "parameters": sum(parameter.numel() for parameter in model.parameters()),
+        "parameters": parameter_count,
     }
     manifest_path = data_root / "fineweb-edu-10bt/manifest.json"
     if manifest_path.is_file():
@@ -113,7 +144,8 @@ def run_experiment(config_path, config, device):
         (output_dir / "run.json").write_text(json.dumps(run, indent=2) + "\n")
         print(
             f"Meow | {run['parameters']:,} parameters | {device}"
-            f" | {config.training.precision} | dp={world_size()}"
+            f" | {config.training.precision} | dp={data_parallel_size()}"
+            f" | pp={pipeline_size()} | recompute={config.training.recompute}"
             f" | mbs={config.data.micro_batch_size} | gbs={config.data.global_batch_size}"
         )
     writer_context = nullcontext(None)
@@ -134,7 +166,8 @@ def run_experiment(config_path, config, device):
             config.training,
             device,
             writer,
-            checkpoint_path=output_dir / "checkpoint.pt",
+            checkpoint_path=output_dir
+            / ("checkpoint" if pipeline_size() > 1 else "checkpoint.pt"),
             checkpoint_interval=config.checkpoint.interval,
             gradient_accumulation_steps=config.data.global_batch_size // local_batch,
             progress=progress,

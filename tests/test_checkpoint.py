@@ -64,13 +64,16 @@ tensorboard:
     return config
 
 
-def run_entry(config, output, dp, max_steps="null", resume=None):
+def run_entry(
+    config, output, dp, layout, recompute="none", max_steps="null", resume=None
+):
+    pp = len(layout)
     command = [sys.executable, "-m"]
-    if dp > 1:
+    if dp * pp > 1:
         command += [
             "torch.distributed.run",
             "--standalone",
-            f"--nproc_per_node={dp}",
+            f"--nproc_per_node={dp * pp}",
             "--module",
         ]
     command += [
@@ -79,6 +82,8 @@ def run_entry(config, output, dp, max_steps="null", resume=None):
         str(config),
         f"output_root={output}",
         f"training.max_steps={max_steps}",
+        f"distributed.pipeline_layout={layout}",
+        f"training.recompute={recompute}",
     ]
     if resume is not None:
         command.append(f"checkpoint.resume={resume}")
@@ -101,20 +106,32 @@ def run_entry(config, output, dp, max_steps="null", resume=None):
     return next(output.iterdir())
 
 
-@pytest.mark.parametrize("dp", [1, 2])
-def test_new_process_resume_matches_uninterrupted_training(tmp_path, dp):
+@pytest.mark.parametrize(
+    "dp,layout,recompute",
+    [(1, [12], "none"), (2, [12], "none"), (2, [5, 7], "selective")],
+)
+def test_new_process_resume_matches_uninterrupted_training(
+    tmp_path, dp, layout, recompute
+):
+    pp = len(layout)
     config = make_experiment(tmp_path)
-    full = run_entry(config, tmp_path / "full", dp)
-    first = run_entry(config, tmp_path / "first", dp, max_steps=1)
+    full = run_entry(config, tmp_path / "full", dp, layout, recompute)
+    first = run_entry(config, tmp_path / "first", dp, layout, recompute, max_steps=1)
+    checkpoint = "checkpoint" if pp > 1 else "checkpoint.pt"
     resumed = run_entry(
-        config, tmp_path / "resumed", dp, resume=first / "checkpoint.pt"
+        config, tmp_path / "resumed", dp, layout, recompute, resume=first / checkpoint
     )
-    expected = torch.load(full / "checkpoint.pt", weights_only=True)
-    actual = torch.load(resumed / "checkpoint.pt", weights_only=True)
-    # Includes optimizer moments/step and every rank's data position.
-    for key in ("model", "optimizer"):
-        torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0)
-    for key in ("progress", "data"):
-        assert actual[key] == expected[key]
-    assert actual["progress"] == {"steps": 3, "tokens_seen": 3 * 8 * 8}
-    assert len(actual["data"]) == dp
+    files = (
+        [f"checkpoint/step-3/stage-{stage}.pt" for stage in range(pp)]
+        if pp > 1
+        else [checkpoint]
+    )
+    for name in files:
+        expected = torch.load(full / name, weights_only=True)
+        actual = torch.load(resumed / name, weights_only=True)
+        for key in ("model", "optimizer"):
+            torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0)
+        for key in ("progress", "data"):
+            assert actual[key] == expected[key]
+        assert actual["progress"] == {"steps": 3, "tokens_seen": 3 * 8 * 8}
+        assert len(actual["data"]) == dp

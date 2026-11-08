@@ -11,7 +11,55 @@ from torch.nn import functional as F
 from core.checkpoint import save_checkpoint
 from core.config import TrainConfig
 from core.device import synchronize
-from core.distributed import rank, world_size
+from core.distributed import (
+    data_parallel_size,
+    pipeline_group,
+    pipeline_rank,
+    pipeline_size,
+    rank,
+    unwrap_model,
+    world_size,
+)
+from core.pipeline import pipeline_step, sync_shared_gradients
+
+
+def _native_step(model, microbatches, device, precision):
+    step_loss = 0.0
+    for micro_step, (inputs, targets) in enumerate(microbatches):
+        inputs = inputs.to(device)
+        targets = targets.to(device)
+        sync_context = (
+            model.no_sync()
+            if data_parallel_size() > 1 and micro_step < len(microbatches) - 1
+            else nullcontext()
+        )
+        with sync_context:
+            with torch.autocast(
+                device_type=device.type,
+                dtype=torch.bfloat16,
+                enabled=precision == "bf16",
+            ):
+                logits = model(inputs)
+            loss = F.cross_entropy(logits.float().flatten(0, 1), targets.flatten())
+            (loss / len(microbatches)).backward()
+        step_loss += loss.detach()
+        del logits, loss
+    return step_loss
+
+
+def _gradient_norm(model):
+    # Count the shared embedding once across the first and last stages.
+    duplicate = (
+        unwrap_model(model).shared_weight
+        if pipeline_size() > 1 and pipeline_rank() == pipeline_size() - 1
+        else None
+    )
+    squared = torch.stack(
+        [p.grad.norm().square() for p in model.parameters() if p is not duplicate]
+    ).sum()
+    if pipeline_size() > 1:
+        dist.all_reduce(squared, group=pipeline_group())
+    return squared.sqrt().item()
 
 
 def train(
@@ -62,35 +110,19 @@ def train(
             if dataset is not None:
                 dataset.load_state_dict(data_before_step)
             break
-        if world_size() > 1:
+        if data_parallel_size() > 1:
             model.zero_grad_buffer()
         else:
             optimizer.zero_grad(set_to_none=True)
-        step_loss = 0.0
-        step_tokens = 0
-        for micro_step, (inputs, targets) in enumerate(microbatches):
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-            sync_context = (
-                model.no_sync()
-                if world_size() > 1 and micro_step < gradient_accumulation_steps - 1
-                else nullcontext()
-            )
-            with sync_context:
-                with torch.autocast(
-                    device_type=device.type,
-                    dtype=torch.bfloat16,
-                    enabled=config.precision == "bf16",
-                ):
-                    logits = model(inputs)
-                loss = F.cross_entropy(logits.float().flatten(0, 1), targets.flatten())
-                # DP averages over ranks; only divide by accumulation here.
-                (loss / gradient_accumulation_steps).backward()
-            step_loss += loss.detach()
-            step_tokens += targets.numel()
-            del logits, loss
-        if world_size() > 1:
+        if pipeline_size() > 1:
+            step_loss = pipeline_step(model, microbatches, device, config.precision)
+        else:
+            step_loss = _native_step(model, microbatches, device, config.precision)
+        step_tokens = sum(targets.numel() for _, targets in microbatches)
+        if data_parallel_size() > 1:
             model.finish_grad_sync()
+        if pipeline_size() > 1:
+            sync_shared_gradients(model)
         optimizer.step()
         # Accelerator operations are asynchronous; time completed work.
         synchronize(device)
@@ -101,8 +133,10 @@ def train(
             slowest = torch.tensor(duration, device=device)
             dist.all_reduce(slowest, op=dist.ReduceOp.MAX)
             duration = slowest.item()
-        final_loss = (step_loss / (gradient_accumulation_steps * world_size())).item()
-        step_tokens *= world_size()
+        final_loss = (
+            step_loss / (gradient_accumulation_steps * data_parallel_size())
+        ).item()
+        step_tokens *= data_parallel_size()
         progress["steps"] += 1
         progress["tokens_seen"] += step_tokens
         steps = progress["steps"]
@@ -126,14 +160,9 @@ def train(
                     f"tokens_per_second={tokens_per_second:.1f}",
                     flush=True,
                 )
+            if pipeline_size() > 1 or writer is not None:
+                grad_norm = _gradient_norm(model)
             if writer is not None:
-                grad_norm = (
-                    torch.stack(
-                        [parameter.grad.norm() for parameter in model.parameters()]
-                    )
-                    .norm()
-                    .item()
-                )
                 for name, value in {
                     "train/loss": final_loss,
                     "train/lr": optimizer.param_groups[0]["lr"],

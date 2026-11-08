@@ -8,6 +8,7 @@ from omegaconf import OmegaConf
 from core.config import (
     CheckpointConfig,
     DataConfig,
+    DistributedConfig,
     ExperimentConfig,
     ModelConfig,
     OptimizerConfig,
@@ -31,6 +32,7 @@ def load_config(path: str | Path, overrides=()) -> ExperimentConfig:
         ("model", ModelConfig),
         ("optimizer", OptimizerConfig),
         ("training", TrainConfig),
+        ("distributed", DistributedConfig),
         ("checkpoint", CheckpointConfig),
         ("tensorboard", TensorBoardConfig),
     ):

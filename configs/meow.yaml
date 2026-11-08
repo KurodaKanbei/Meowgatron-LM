@@ -1,7 +1,7 @@
-# FineWeb-Edu 10BT，GBS 256；DP 卡数由 torchrun 决定。
+# FineWeb-Edu 10BT，GBS 256；DP = 总进程数 / PP。
 device: ${oc.env:MEOWGATRON_DEVICE,npu:0}
 seed: 42
-output_root: ../runs/meow-0.5b
+output_root: ../runs/meow
 
 data:
   root: ${oc.env:MEOWGATRON_DATA_ROOT,../data}
@@ -11,10 +11,10 @@ data:
 model:
   vocab_size: 50257
   hidden_size: 1280
-  num_heads: 20
+  num_heads: 32
   mlp_hidden_size: ${meow.mul:4,${model.hidden_size}}
   max_seq_len: 512
-  num_layers: 20
+  num_layers: 16
 
 optimizer:
   lr: 0.0003
@@ -24,6 +24,12 @@ training:
   max_steps: null
   precision: bf16
   log_interval: 100
+  recompute: none
+  # selective 区域：attention、norm、mlp_act、mlp；mlp 包含 mlp_act。
+  recompute_modules: [attention, mlp_act]
+
+distributed:
+  pipeline_layout: ["${model.num_layers}"]
 
 checkpoint:
   interval: 1000

@@ -66,8 +66,8 @@ meowgatron-data/
 当前只准备训练数据，不划分 eval，不做 shuffle，使用 `num_workers=0`。
 分词使用流式读取，每次处理一小批文档。
 
-DP 按 packed 样本的全局编号分配数据：样本 `i` 交给 rank `i % world_size`。
-各 rank 读取同一条 token 流，组成一次更新的样本合起来与单卡相同。
+DP 按 packed 样本的全局编号分配数据：样本 `i` 交给 DP rank `i % DP`。
+同一条 PP 流水线的各 stage 读取相同样本；各 DP 副本合起来，一次更新仍使用与单卡相同的样本。
 当前实现会在每个 rank 重复读取和分词，这部分开销也计入训练时间。
 
 `TokenDataset` 保存分片、row group、文档位置、剩余 packing token 和样本编号。

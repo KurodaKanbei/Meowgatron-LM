@@ -18,6 +18,15 @@ class TrainConfig:
     max_steps: int | None = 100
     precision: str = "fp32"
     log_interval: int = 10
+    recompute: str = "none"
+    recompute_modules: list[str] = field(
+        default_factory=lambda: ["attention", "mlp_act"]
+    )
+
+
+@dataclass(frozen=True)
+class DistributedConfig:
+    pipeline_layout: list[int] = field(default_factory=lambda: [1])
 
 
 @dataclass(frozen=True)
@@ -54,5 +63,6 @@ class ExperimentConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     training: TrainConfig = field(default_factory=TrainConfig)
+    distributed: DistributedConfig = field(default_factory=DistributedConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tensorboard: TensorBoardConfig = field(default_factory=TensorBoardConfig)
